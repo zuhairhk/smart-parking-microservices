@@ -1,0 +1,69 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  sensor-service:
+    build: ./sensor-service
+    environment:
+      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
+      - EXCHANGE_NAME=parking
+      - ROUTING_KEY=spot.update
+      - ZONES=A,B
+      - SPOTS_PER_ZONE=12
+      - PUBLISH_EVERY_SECONDS=1.0
+      - FLIP_PROB=0.12
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    ports:
+      - "8001:8000"
+
+  parking-service:
+    build: ./parking-service
+    environment:
+      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
+      - EXCHANGE_NAME=parking
+      - ROUTING_KEY=spot.update
+      - RESERVATION_TTL_SECONDS=300
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    ports:
+      - "8002:8000"
+
+  reservation-service:
+    build: ./reservation-service
+    environment:
+      - PARKING_BASE_URL=http://parking-service:8000
+    depends_on:
+      - parking-service
+    ports:
+      - "8003:8000"
+
+  pricing-service:
+    build: ./pricing-service
+    environment:
+      - PARKING_BASE_URL=http://parking-service:8000
+      - BASE_PRICE=3.00
+      - MAX_MULTIPLIER=3.0
+    depends_on:
+      - parking-service
+    ports:
+      - "8004:8000"
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - parking-service
+      - reservation-service
+      - pricing-service
+    ports:
+      - "8080:80"

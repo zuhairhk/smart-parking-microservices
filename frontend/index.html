@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>ParkOS</title>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <div class="wordmark">ParkOS</div>
+      <h1>Smart Parking</h1>
+    </div>
+    <div class="live-badge">
+      <span class="live-dot"></span>
+      Live
+    </div>
+  </header>
+
+  <div class="top-row">
+
+    <!-- Zone + Stats card -->
+    <div class="card">
+      <div class="card-label">Zone</div>
+
+      <div class="zone-tabs" id="zoneTabs"></div>
+
+      <div class="stats-grid">
+        <div class="stat-item">
+          <div class="stat-value" id="statTotal">—</div>
+          <div class="stat-label">Total</div>
+        </div>
+        <div class="stat-item warn" id="statOccCard">
+          <div class="stat-value" id="statOcc">—</div>
+          <div class="stat-label">Occupied</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="statRes">—</div>
+          <div class="stat-label">Reserved</div>
+        </div>
+        <div class="stat-item highlight">
+          <div class="stat-value" id="statAvail">—</div>
+          <div class="stat-label">Available</div>
+        </div>
+      </div>
+
+      <div class="price-row">
+        <div>
+          <div class="price-main" id="priceMain">—</div>
+          <div class="price-meta" id="priceMeta">per hour · dynamic pricing</div>
+        </div>
+        <span class="price-tag low" id="priceTag">—</span>
+      </div>
+
+      <div class="refresh-row">
+        <button class="btn btn-secondary" style="flex:1" onclick="refreshAll()">↻ Refresh</button>
+        <button class="btn btn-secondary" style="flex:1" id="autoBtn" onclick="toggleAuto()">Auto-refresh</button>
+      </div>
+    </div>
+
+    <!-- Reserve / Release card -->
+    <div class="card">
+      <div class="card-label">Reserve a Spot</div>
+
+      <!-- Active reservation banner (shown after reserving) -->
+      <div class="active-res" id="activeRes">
+        <div class="active-res-top">
+          <span class="active-res-title">Your reservation</span>
+          <button class="btn btn-danger btn-sm" onclick="releaseActive()">Release</button>
+        </div>
+        <div class="active-res-spot" id="activeResSpot">—</div>
+        <div class="active-res-until" id="activeResUntil">—</div>
+      </div>
+
+      <div class="field">
+        <label class="field-label" for="driver">Driver ID</label>
+        <input class="input" id="driver" placeholder="e.g. jen123" autocomplete="off"/>
+      </div>
+
+      <div class="action-row">
+        <button class="btn btn-primary" style="flex:1" onclick="reserve()">Reserve first available</button>
+        <button class="btn btn-secondary" onclick="listReservations()">All reservations</button>
+      </div>
+
+      <div id="actionOut" style="font-size:12px; color:var(--text-secondary); font-family:var(--mono); white-space:pre-wrap; max-height:160px; overflow-y:auto; line-height:1.6;"></div>
+    </div>
+
+  </div>
+
+  <!-- Spots grid -->
+  <div class="spots-card">
+    <div class="spots-header">
+      <h2>Spots — live</h2>
+      <div class="spots-legend">
+        <div class="legend-item"><span class="legend-dot free"></span>Free</div>
+        <div class="legend-item"><span class="legend-dot reserved"></span>Reserved</div>
+        <div class="legend-item"><span class="legend-dot occupied"></span>Occupied</div>
+      </div>
+    </div>
+    <div id="spotsGrid"></div>
+  </div>
+
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+  const PARKING = "http://localhost:8002";
+  const RESERVE  = "http://localhost:8003";
+  const PRICING  = "http://localhost:8004";
+
+  let currentZone = null;
+  let autoTimer   = null;
+  let myReservation = null; // {reservation_id, spot_id, zone, reserved_until}
+
+  // ── Utilities ──────────────────────────────────────────────────────────────
+
+  function toast(msg, type = "") {
+    const el = document.getElementById("toast");
+    el.textContent = msg;
+    el.className = "toast show" + (type ? " " + type : "");
+    clearTimeout(el._t);
+    el._t = setTimeout(() => { el.className = "toast"; }, 2800);
+  }
+
+  function setOut(obj) {
+    const el = document.getElementById("actionOut");
+    el.textContent = (typeof obj === "string") ? obj : JSON.stringify(obj, null, 2);
+  }
+
+  async function getJSON(url, opts) {
+    const r   = await fetch(url, opts);
+    const txt = await r.text();
+    let body  = null;
+    try { body = JSON.parse(txt); } catch(e) { body = txt; }
+    if (!r.ok) throw new Error(typeof body === "string" ? body : (body?.detail || JSON.stringify(body)));
+    return body;
+  }
+
+  function formatUntil(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    return "Expires " + d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+  }
+
+  // ── Zone tabs ──────────────────────────────────────────────────────────────
+
+  async function loadZones() {
+    try {
+      const z   = await getJSON(`${PARKING}/zones`);
+      const tabs = document.getElementById("zoneTabs");
+      tabs.innerHTML = "";
+      const zones = z.zones?.length ? z.zones : ["A", "B"];
+      zones.forEach((zz, i) => {
+        const btn = document.createElement("button");
+        btn.className = "zone-tab" + (i === 0 ? " active" : "");
+        btn.textContent = "Zone " + zz;
+        btn.onclick = () => selectZone(zz);
+        tabs.appendChild(btn);
+        if (i === 0) currentZone = zz;
+      });
+    } catch(e) {
+      // fallback
+      const tabs = document.getElementById("zoneTabs");
+      ["A","B"].forEach((zz, i) => {
+        const btn = document.createElement("button");
+        btn.className = "zone-tab" + (i === 0 ? " active" : "");
+        btn.textContent = "Zone " + zz;
+        btn.onclick = () => selectZone(zz);
+        tabs.appendChild(btn);
+      });
+      currentZone = "A";
+    }
+  }
+
+  function selectZone(zz) {
+    currentZone = zz;
+    document.querySelectorAll(".zone-tab").forEach(b => {
+      b.classList.toggle("active", b.textContent === "Zone " + zz);
+    });
+    refreshAll();
+  }
+
+  // ── Refresh ────────────────────────────────────────────────────────────────
+
+  async function refreshAll() {
+    const zone = currentZone || "A";
+    await Promise.allSettled([refreshStats(zone), refreshPrice(zone), refreshSpots(zone)]);
+  }
+
+  async function refreshStats(zone) {
+    try {
+      const s = await getJSON(`${PARKING}/stats/${zone}`);
+      document.getElementById("statTotal").textContent  = s.total ?? "—";
+      document.getElementById("statOcc").textContent    = s.occupied ?? "—";
+      document.getElementById("statRes").textContent    = s.reserved_active ?? "—";
+      document.getElementById("statAvail").textContent  = s.available ?? "—";
+    } catch(e) {
+      ["statTotal","statOcc","statRes","statAvail"].forEach(id => {
+        document.getElementById(id).textContent = "—";
+      });
+    }
+  }
+
+  async function refreshPrice(zone) {
+    try {
+      const p = await getJSON(`${PRICING}/price/${zone}`);
+      document.getElementById("priceMain").textContent = `$${p.price}`;
+      document.getElementById("priceMeta").textContent = `mult ×${p.multiplier} · ${Math.round(p.occupancy_rate*100)}% occupied`;
+      const tag = document.getElementById("priceTag");
+      const m = p.multiplier;
+      if (m < 1.3) {
+        tag.textContent = "Low demand"; tag.className = "price-tag low";
+      } else if (m < 2.0) {
+        tag.textContent = "Moderate";   tag.className = "price-tag mid";
+      } else {
+        tag.textContent = "High demand"; tag.className = "price-tag high";
+      }
+    } catch(e) {
+      document.getElementById("priceMain").textContent = "—";
+      document.getElementById("priceTag").textContent  = "";
+    }
+  }
+
+  async function refreshSpots(zone) {
+    try {
+      const data  = await getJSON(`${PARKING}/zones/${zone}/spots`);
+      renderSpots(data.spots || []);
+    } catch(e) {
+      document.getElementById("spotsGrid").innerHTML =
+        `<div class="empty-state">No data yet — wait a few seconds and refresh.</div>`;
+    }
+  }
+
+  // ── Render spots grid ──────────────────────────────────────────────────────
+
+  function renderSpots(spots) {
+    if (!spots.length) {
+      document.getElementById("spotsGrid").innerHTML =
+        `<div class="empty-state">No spots found in this zone.</div>`;
+      return;
+    }
+    const grid = document.createElement("div");
+    grid.className = "spots-grid";
+
+    for (const s of spots) {
+      const isMySpot = myReservation && myReservation.spot_id === s.spot_id && myReservation.zone === currentZone;
+      let cls = "free";
+      let label = "Free";
+      if (s.reserved_active) { cls = "reserved"; label = "Reserved"; }
+      if (s.occupied)        { cls = "occupied";  label = "Occupied"; }
+      if (isMySpot)          { cls += " my-spot"; label = "Yours"; }
+
+      let tip = label;
+      if (s.reserved_by)    tip += ` · ${s.reserved_by}`;
+      if (isMySpot)         tip = `Your spot · expires ${new Date(s.reserved_until).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}`;
+
+      const cell = document.createElement("div");
+      cell.className = `spot-cell ${cls}`;
+      cell.innerHTML = `
+        <span class="spot-num">${s.spot_id}</span>
+        <span class="spot-status-icon">${label}</span>
+        <span class="spot-tooltip">${tip}</span>
+      `;
+      grid.appendChild(cell);
+    }
+    document.getElementById("spotsGrid").innerHTML = "";
+    document.getElementById("spotsGrid").appendChild(grid);
+  }
+
+  // ── Reserve ────────────────────────────────────────────────────────────────
+
+  async function reserve() {
+    const driver = document.getElementById("driver").value.trim();
+    const zone   = currentZone || "A";
+    if (!driver) { toast("Enter a Driver ID first", "error"); return; }
+    if (myReservation) { toast("Release your current reservation first", "error"); return; }
+
+    try {
+      const rec = await getJSON(`${RESERVE}/reserve`, {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({driver_id: driver, zone})
+      });
+      myReservation = rec;
+      showActiveRes(rec);
+      setOut("");
+      toast(`Reserved spot ${rec.spot_id} in Zone ${zone}`);
+      await refreshAll();
+    } catch(e) {
+      toast(e.message, "error");
+    }
+  }
+
+  function showActiveRes(rec) {
+    const banner = document.getElementById("activeRes");
+    document.getElementById("activeResSpot").textContent =
+      `Zone ${rec.zone} · Spot ${rec.spot_id}`;
+    document.getElementById("activeResUntil").textContent = formatUntil(rec.reserved_until);
+    banner.classList.add("visible");
+  }
+
+  // ── Release ────────────────────────────────────────────────────────────────
+
+  async function releaseActive() {
+    if (!myReservation) return;
+    const driver = document.getElementById("driver").value.trim();
+    if (!driver) { toast("Enter your Driver ID to release", "error"); return; }
+
+    try {
+      await getJSON(`${RESERVE}/release`, {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({driver_id: driver, reservation_id: myReservation.reservation_id})
+      });
+      myReservation = null;
+      document.getElementById("activeRes").classList.remove("visible");
+      toast("Reservation released");
+      await refreshAll();
+    } catch(e) {
+      toast(e.message, "error");
+    }
+  }
+
+  // ── List reservations ──────────────────────────────────────────────────────
+
+  async function listReservations() {
+    try {
+      const out = await getJSON(`${RESERVE}/reservations`);
+      setOut(out);
+    } catch(e) {
+      setOut(e.message);
+    }
+  }
+
+  // ── Auto-refresh ───────────────────────────────────────────────────────────
+
+  function toggleAuto() {
+    const btn = document.getElementById("autoBtn");
+    if (autoTimer) {
+      clearInterval(autoTimer);
+      autoTimer = null;
+      btn.textContent = "Auto-refresh";
+      btn.classList.remove("btn-primary");
+      btn.classList.add("btn-secondary");
+      toast("Auto-refresh off");
+    } else {
+      autoTimer = setInterval(refreshAll, 3000);
+      btn.innerHTML = `<span class="live-dot" style="background:#fff;display:inline-block;width:6px;height:6px;border-radius:50%;animation:pulse 2s infinite;margin-right:4px;"></span>Auto-refresh on`;
+      btn.classList.remove("btn-secondary");
+      btn.classList.add("btn-primary");
+      toast("Auto-refresh every 3s");
+    }
+  }
+
+  // ── Init ───────────────────────────────────────────────────────────────────
+
+  (async function init() {
+    await loadZones();
+    await refreshAll();
+  })();
+</script>
+</body>
+</html>
