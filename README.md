@@ -68,7 +68,7 @@ curl http://localhost:8004/price/A
 ```
 
 ## 4) Instructions if you'd like to test yourself
-1. Open dashboard, pick zone A, look at availability table updating (Refresh / Auto-refresh).
+1. Open the dashboard, pick zone A, look at availability table updating (Refresh / Auto-refresh).
 2. View price changes as occupancy changes.
 3. Reserve first available (shows reservation_id).
 4. View when the reserved spot becomes unavailable.
@@ -77,3 +77,4 @@ curl http://localhost:8004/price/A
 
 ## 5) Notes
 - Reservation TTL is 300s by default as we set in `docker-compose.yml`.
+  
