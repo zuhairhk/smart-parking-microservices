@@ -67,15 +67,13 @@ Get price for zone A:
 curl http://localhost:8004/price/A
 ```
 
-## 4) How the demo should be presented (suggested)
-1. Open dashboard, pick zone A, show availability table updating (Refresh / Auto-refresh).
-2. Show price changes as occupancy changes.
+## 4) Instructions if you'd like to test yourself
+1. Open dashboard, pick zone A, look at availability table updating (Refresh / Auto-refresh).
+2. View price changes as occupancy changes.
 3. Reserve first available (shows reservation_id).
-4. Show the reserved spot becomes unavailable.
-5. Release reservation and show spot becomes available again.
-6. Optional: open RabbitMQ UI to show messages flowing.
+4. View when the reserved spot becomes unavailable.
+5. Release reservation to show spot becomes available again.
+6. Can also visit RabbitMQ UI to view messages flowing.
 
 ## 5) Notes
-- Data storage is in-memory (fine for course demo).  
-  If you want persistence, add a database container and store parking state/reservations there.
-- Reservation TTL is 300s by default. You can change it in `docker-compose.yml`.
+- Reservation TTL is 300s by default as we set in `docker-compose.yml`.
