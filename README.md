@@ -1,4 +1,4 @@
-# Distributed Smart Parking System (Cloud Microservices) — COE892
+# Distributed Smart Parking System
 
 This project implements a **distributed smart parking system** using **cloud-style microservices**:
 - Sensor Simulation Service (publishes spot availability updates)
